@@ -61,6 +61,7 @@ class SurgeryMappings:
     phase_mapping: Dict[int, str] = {i: phase.value for i, phase in enumerate(Phase)}
 
     # Flattened mapping for all detectable objects (instrument + target)
+    # TODO: Need to make sure why 'specimen_bag' appear twice, and if this is not a problem.
     mapping: Dict[int, str] = {
         0: "grasper", 1: "bipolar", 2: "hook", 3: "scissors", 4: "clipper", 5: "irrigator", 6: "specimen_bag",
         7: "gallbladder", 8: "cystic_plate", 9: "cystic_duct", 10: "cystic_artery", 11: "cystic_pedicle",
