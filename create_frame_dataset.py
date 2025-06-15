@@ -1,69 +1,14 @@
 import json
 import os
-import pickle
 import re
-import sys
 
 import numpy as np
-import matplotlib.pyplot as plt
 from PIL import Image
 import torch
 from torchvision import transforms
-from torchvision.transforms import functional as F
 
 
-instrument_mapping = {
-    0: "grasper",
-    1: "bipolar",
-    2: "hook",
-    3: "scissors",
-    4: "clipper",
-    5: "irrigator",
-    6: "specimen_bag",
-    7: "no_instrument",
-}
-
-verb_mapping = {
-    0: "grasp",
-    1: "retract",
-    2: "dissect",
-    3: "coagulate",
-    4: "clip",
-    5: "cut",
-    6: "aspirate",
-    7: "irrigate",
-    8: "pack",
-    9: "null_verb",
-}
-
-target_mapping = {
-    0: "gallbladder",
-    1: "cystic_plate",
-    2: "cystic_duct",
-    3: "cystic_artery",
-    4: "cystic_pedicle",
-    5: "blood_vessel",
-    6: "fluid",
-    7: "abdominal_wall_cavity",
-    8: "liver",
-    9: "adhesion",
-    10: "omentum",
-    11: "peritoneum",
-    12: "gut",
-    13: "specimen_bag",
-    14: "null_target",
-}
-
-phase_mapping = {
-    0: "preparation",
-    1: "calot-triangle-dissection",
-    2: "clipping-and-cutting",
-    3: "gallbladder-dissection",
-    4: "gallbladder-packaging",
-    5: "cleaning-and-coagulation",
-    6: "gallbladder-extraction",
-}
-
+# Object dictionary
 mapping = {
     0: "grasper",
     1: "bipolar",
@@ -88,17 +33,34 @@ mapping = {
     20: "null_target",
 }
 
+# Reverses the object dictionary in order to get the key
 reverse_mapping = {v: k for k, v in mapping.items()}
 
 
+# List of important data as well as saving directories
 raw_data_dir = "data/CholecT50"
 raw_video_dir = raw_data_dir + "/videos"
 raw_annotations_dir = raw_data_dir + "/labels"
-
 save_dir = "data/save"
 
 
 def get_objects(frame_annotation):
+    """
+    Extracts and returns a list of non-null instruments and targets
+    from a frame's annotation vectors.
+
+    Args:
+        frame_annotation (list of list[int]):
+            A list of annotation vectors for a given video frame.
+            The first element of each vector contains the the index of a triplet
+            that refers to a structured (instrument, verb, target) annotation.
+
+    Returns:
+        list[str] or str:
+            A list of strings representing the instruments and targets
+            (excluding any "null_instrument" or "null_target" labels) found in the triplets.
+            Returns the string "Unknown" if a triplet index is -1.
+    """
     objects = []
     for annotation_vector in frame_annotation:
         triplet_idx = annotation_vector[0]
@@ -106,7 +68,8 @@ def get_objects(frame_annotation):
         if triplet_idx == -1:
             return "Unknown"
 
-        # Note: it does not matter which file we choose here, the triplets indexing is always the same
+        # Note: it does not matter which annotation file we choose here,
+        # the triplets indexing is always the same
         with open(raw_annotations_dir + "/VID01.json", "r") as file:
             data = json.load(file)
         triplets = data["categories"]["triplet"]
@@ -122,6 +85,21 @@ def get_objects(frame_annotation):
 
 
 def get_frame_caption(frame_annotation):
+    """
+    Generates a natural language caption describing the actions in a frame
+    based on the annotated triplets and surgical phase.
+
+    Args:
+        frame_annotation (list of list[int]):
+            Each annotation vector contains a triplet index and a phase index.
+            The triplet index refers to an (instrument, verb, target) combination.
+            The phase index refers to the current surgical phase.
+
+    Returns:
+        str:
+            A descriptive sentence summarizing the actions in the frame.
+            Returns "Unknown" if any triplet index is -1.
+    """
     n = len(frame_annotation)
     i = 1
     result = ""
@@ -133,6 +111,8 @@ def get_frame_caption(frame_annotation):
         if triplet_idx == -1:
             return "Unknown"
 
+        # Note: it does not matter which annotation file we choose here,
+        # the triplets indexing is always the same
         with open(raw_annotations_dir + "/VID01.json", "r") as file:
             data = json.load(file)
 
@@ -164,6 +144,19 @@ def get_frame_caption(frame_annotation):
 
 
 def preprocess_frame(frame_path, target_size=(224, 224)):
+    """
+    Loads and preprocesses a video frame for model input.
+
+    Args:
+        frame_path (str):
+            Path to the video frame file.
+        target_size (tuple of int):
+            Desired (width, height) for resizing the image. Default is (224, 224).
+
+    Returns:
+        torch.Tensor:
+            A tensor representation of the frame, normalized to [0,1] with shape (3, H, W).
+    """
     transform = transforms.Compose(
         [
             transforms.Resize(target_size),
@@ -178,8 +171,23 @@ def preprocess_frame(frame_path, target_size=(224, 224)):
 
 
 def annotation_to_label(frame_annotation):
+    """
+    Converts a frame's annotation into a multi-hot label vector.
+
+    Args:
+        frame_annotation (list of list[int]):
+            Each annotation vector includes a triplet index referring to
+            an (instrument, verb, target) triplet.
+
+    Returns:
+        np.ndarray:
+            A binary vector of shape (21,), where each index indicates the
+            presence (1) or absence (0) of a specific instrument or target.
+    """
     labels = np.zeros(21)
 
+    # Note: it does not matter which annotation file we choose here,
+    # the triplets indexing is always the same
     with open(raw_annotations_dir + "/VID01.json", "r") as file:
         data = json.load(file)
 
@@ -203,9 +211,32 @@ def annotation_to_label(frame_annotation):
     return labels
 
 
-def create_dataset(
+def create_frame_dataset(
     raw_video_dir, raw_annotations_dir, start_video=None, end_video=None
 ):
+    """
+    Creates a dataset of annotated and preprocessed frames from videos.
+
+    Args:
+        raw_video_dir (str):
+            Path to the directory containing folders of extracted video frames.
+        raw_annotations_dir (str):
+            Path to the directory containing JSON annotation files (one per video).
+        start_video (int, optional):
+            Index of the first video to include (for slicing the video folder list).
+        end_video (int, optional):
+            Index of the last video to include (exclusive).
+
+    Returns:
+        list of dict:
+            Each dict contains:
+                - "video": ID of the video
+                - "frame_number": frame filename (without extension)
+                - "frame": preprocessed image tensor
+                - "object_labels": multi-hot vector of object/target presence
+                - "objects": list of detected instrument/target names
+                - "frame_caption": generated natural language description
+    """
     dataset = []
 
     all_video_folders = sorted(os.listdir(raw_video_dir))
@@ -277,7 +308,7 @@ def main():
     start_video = 0
     end_video = 1
 
-    dataset = create_dataset(
+    dataset = create_frame_dataset(
         raw_video_dir, raw_annotations_dir, start_video=start_video, end_video=end_video
     )
 
