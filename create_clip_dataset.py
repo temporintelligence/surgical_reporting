@@ -35,7 +35,8 @@ def load_and_preprocess_frames(clip, target_size=(224, 224), device=None):
                 - H, W: target height and width
     """
     if device is None:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        device = "cpu"
 
     transform = transforms.Compose(
         [
@@ -334,7 +335,7 @@ def create_clip_dataset(raw_video_dir, clip_length, overlap, start_video, end_vi
 
 def main():
     start_video = 0
-    end_video = 1
+    end_video = 10
     clip_length = 32
     overlap = 16
 

@@ -244,6 +244,7 @@ def create_frame_dataset(
         all_video_folders = all_video_folders[start_video:end_video]
 
     for video_folder in all_video_folders:
+        print(f"Processing: {video_folder}")
         video_path = os.path.join(raw_video_dir, video_folder)
 
         if not os.path.isdir(video_path):
@@ -306,7 +307,7 @@ def create_frame_dataset(
 
 def main():
     start_video = 0
-    end_video = 1
+    end_video = 10
 
     dataset = create_frame_dataset(
         raw_video_dir, raw_annotations_dir, start_video=start_video, end_video=end_video
